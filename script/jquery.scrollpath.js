@@ -29,7 +29,10 @@
 		isDragging = false,
 		isAnimating = false,
 		step,
+		currentMainStep = 0,
+		onBranch = false,
 		pathObject,
+		branches = {},
 		pathList,
 		element,
 		scrollBar,
@@ -57,7 +60,12 @@
 				isInitialized = true;
 				element = this;
 				pathList = pathObject.getPath();
-				initCanvas();
+				if ( settings.drawPath && HAS_CANVAS_SUPPORT ) {
+					pathObject.initCanvas();
+					$.each(branches, function(i, p) {
+						p.initCanvas();
+					});
+				}
 				initScrollBar();
 				scrollToStep( 0 ); // Go to the first step immediately
 				element.css( "position", "relative" );
@@ -80,7 +88,36 @@
 
 			getPath: function( options ) {
 				$.extend( speeds, options );
-				return pathObject || ( pathObject = new Path( speeds.scrollSpeed, speeds.rotationSpeed ));
+				return pathObject || ( pathObject = new Path(speeds.scrollSpeed, speeds.rotationSpeed ));
+			},
+
+			getOptPath: function(name, options) {
+				var opts = $.extend(true, {}, speeds);
+				$.extend( opts, options);
+				return branches[name] || (branches[name] = new Path(opts.scrollSpeed, opts.rotationSpeed));
+			},
+
+			changePath: function(name, duration, easing, callback) {
+
+				if(typeof name === 'undefined' || typeof branches[name] === 'undefined') {
+
+					if(onBranch === true) {
+						onBranch = false;
+						pathList = pathObject.getPath();
+						branchTransition(currentMainStep, duration, easing, callback);
+						return this;
+					}
+
+					return this;
+				}
+
+				currentMainStep = step;
+				onBranch = true;
+
+				pathList = branches[name].getPath();
+				console.log();
+				branchTransition(pathList.length - 1, duration, easing, callback);
+				return this;
 			},
 
 			scrollTo: function( name, duration, easing, callback ) {
@@ -103,7 +140,7 @@
 	
 	/* The Path object serves as a context to "draw" the scroll path
 		on before initializing the plugin */
-	function Path( scrollS, rotateS ) {
+	function Path(scrollS, rotateS ) {
 		var PADDING = 40,
 			scrollSpeed = scrollS,
 			rotationSpeed = rotateS,
@@ -287,6 +324,49 @@
 			return offsetY - PADDING / 2;
 		};
 
+		this.initCanvas = function() {
+			var canvas,
+				style = {
+					position: "absolute",
+					"z-index": 9998,
+					left: this.getPathOffsetX(),
+					top: this.getPathOffsetY(),
+					"pointer-events": "none"
+				};
+
+			applyPrefix( style, "user-select", "none" );
+			applyPrefix( style, "user-drag", "none" );
+
+			canvas = $( "<canvas>" ).
+				addClass( "sp-canvas" ).
+				css( style ).
+				prependTo( element );
+
+			canvas[ 0 ].width = this.getPathWidth();
+			canvas[ 0 ].height = this.getPathHeight();
+
+			this.drawCanvasPath( canvas[ 0 ].getContext( "2d" ), this.getCanvasPath());
+		};
+
+		this.drawCanvasPath = function(context, path) {
+			var i = 0;
+
+			var color = '#'+(0x1000000+(Math.random())*0xffffff).toString(16).substr(1,6);
+
+			context.shadowBlur = 15;
+			context.shadowColor = "black";
+			context.strokeStyle = color;
+			context.lineJoin = "round";
+			context.lineCap = "round";
+			context.lineWidth = 10;
+
+			for( ; i < path.length; i++ ) {
+				context[ path[ i ].method ].apply( context, path[ i ].args );
+			}
+
+			context.stroke();
+		};
+
 		/* Sets the current position */
 		function setPos( x, y ) {
 			xPos = x;
@@ -354,52 +434,6 @@
 		});
 
 		$( "body" ).prepend( scrollBar.append( scrollHandle ) );
-		
-	}
-
-	/* Initializes the path canvas */
-	function initCanvas() {
-		if ( !settings.drawPath || !HAS_CANVAS_SUPPORT ) return;
-
-		var canvas,
-			style = {
-				position: "absolute",
-				"z-index": 9998,
-				left: pathObject.getPathOffsetX(),
-				top: pathObject.getPathOffsetY(),
-				"pointer-events": "none"
-			};
-		
-		applyPrefix( style, "user-select", "none" );
-		applyPrefix( style, "user-drag", "none" );
-		
-		canvas = $( "<canvas>" ).
-					addClass( "sp-canvas" ).
-					css( style ).
-					prependTo( element );
-		
-		canvas[ 0 ].width = pathObject.getPathWidth();
-		canvas[ 0 ].height = pathObject.getPathHeight();
-		
-		drawCanvasPath( canvas[ 0 ].getContext( "2d" ), pathObject.getCanvasPath() );
-	}
-
-	/* Sets the canvas path styles and draws the path */
-	function drawCanvasPath( context, path ) {
-		var i = 0;
-
-		context.shadowBlur = 15;
-		context.shadowColor = "black";
-		context.strokeStyle = "white";
-		context.lineJoin = "round";
-		context.lineCap = "round";
-		context.lineWidth = 10;
-
-		for( ; i < path.length; i++ ) {
-			context[ path[ i ].method ].apply( context, path[ i ].args );
-		}
-
-		context.stroke();
 	}
 
 	/* Handles mousewheel scrolling */
@@ -493,6 +527,26 @@
 		if (pathList[ stepParam ] ){
 			cb = pathList[ stepParam ].callback;
 			element.css( makeCSS( pathList[ stepParam ] ) );
+		}
+		if( scrollHandle ) scrollHandle.css( "top", stepParam / (pathList.length - 1 ) * ( scrollBar.height() - scrollHandle.height() ) + "px" );
+		if ( cb && stepParam !== step && !isAnimating ) cb();
+		step = stepParam;
+	}
+
+	function branchTransition(stepParam, duration, easing, callback) {
+		if (isAnimating) return;
+		var cb;
+
+		isAnimating = true;
+
+		if (pathList[ stepParam ] ){
+			cb = pathList[ stepParam ].callback;
+			element.animate( makeCSS( pathList[ stepParam ]), duration, easing, function() {
+				isAnimating = false;
+				if(callback) {
+					callback();
+				}
+			});
 		}
 		if( scrollHandle ) scrollHandle.css( "top", stepParam / (pathList.length - 1 ) * ( scrollBar.height() - scrollHandle.height() ) + "px" );
 		if ( cb && stepParam !== step && !isAnimating ) cb();
