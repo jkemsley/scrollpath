@@ -1,21 +1,34 @@
 /*
                 =============================
                   jQuery Scroll Path Plugin
+                  		JKemsley version
                             v1.1.1
 
-                   Demo and Documentation:
+            Demo and Documentation for orgiginal at:
                   http://joelb.me/scrollpath
+
                 =============================
 
     A jQuery plugin for defining a custom path that the browser
     follows when scrolling. Comes with a custom scrollbar,
     which is styled in scrollpath.css.
 
-    Author: Joel Besada (http://www.joelb.me)
-    Date: 2012-02-01
+    Author: Joel Besada (http://www.joelb.me) with changes made by Jody Kemsley
+    Date: 2013-03-17
 
     Copyright 2012, Joel Besada
     MIT Licensed (http://www.opensource.org/licenses/mit-license.php)
+
+
+    Changes by Jody Kemsley supporting multiple branches is currently being
+    developed at: 
+
+    https://github.com/jkemsley/scrollpath
+
+    These changes were custom made to support functionality I needed for my 
+    own project but I plan to finish them and submit a pull request to Joel 
+    as soon as it is ready for use by others. For now if you are interested 
+    you can follow this on the url above.
 */
 ( function ( $, window, document, undefined ) {
 	var	PREFIX =  "-" + getVendorPrefix().toLowerCase() + "-",
@@ -31,6 +44,7 @@
 		step,
 		currentMainStep = 0,
 		onBranch = false,
+		activeBranch,
 		pathObject,
 		branches = {},
 		pathList,
@@ -54,6 +68,7 @@
 		methods = {
 			/* Initializes the plugin */
 			init: function( options ) {
+
 				if ( this.length > 1 || isInitialized ) $.error( "jQuery.scrollPath can only be initialized on *one* element *once*" );
 				
 				$.extend( settings, options );
@@ -91,37 +106,50 @@
 				return pathObject || ( pathObject = new Path(speeds.scrollSpeed, speeds.rotationSpeed ));
 			},
 
-			getOptPath: function(name, options) {
+			getBranchPath: function(name, options) {
 				var opts = $.extend(true, {}, speeds);
 				$.extend( opts, options);
 				return branches[name] || (branches[name] = new Path(opts.scrollSpeed, opts.rotationSpeed));
 			},
 
 			changePath: function(name, duration, easing, callback) {
+				if(isAnimating === true || name === activeBranch) {
+					return this;
+				}
 
 				if(typeof name === 'undefined' || typeof branches[name] === 'undefined') {
 
 					if(onBranch === true) {
 						onBranch = false;
-						pathList = pathObject.getPath();
-						branchTransition(currentMainStep, duration, easing, callback);
+						activeBranch = '';
+						animateSteps(-step, duration, easing, function() {
+							step = currentMainStep;
+							pathList = pathObject.getPath();
+							branchTransition(currentMainStep, duration, easing, callback);
+						});
 						return this;
 					}
-
 					return this;
 				}
 
 				currentMainStep = step;
 				onBranch = true;
-
+				activeBranch = name;
 				pathList = branches[name].getPath();
-				console.log();
-				branchTransition(pathList.length - 1, duration, easing, callback);
+				step = 0;
+
+				branchTransition(0, duration, easing, callback);
 				return this;
 			},
 
+			onBranch: function() {
+				return onBranch;
+			}, 
+
 			scrollTo: function( name, duration, easing, callback ) {
+
 				var destination = findStep( name );
+
 				if ( destination === undefined ) $.error( "jQuery.scrollPath could not find scroll target with name '" + name + "'" );
 
 				var distance = destination - step;
@@ -133,7 +161,8 @@
 						distance = pathList.length - step + destination;
 					}
 				}
-				animateSteps( distance, duration, easing, callback );
+
+				animateSteps( distance, duration, easing, callback);
 				return this;
 			}
 		};
@@ -438,6 +467,11 @@
 
 	/* Handles mousewheel scrolling */
 	function scrollHandler( e ) {
+		if(onBranch === true) {
+			e.preventDefault();
+			return;
+		}
+
 		var scrollDelta = e.originalEvent.wheelDelta || -e.originalEvent.detail,
 			dir = scrollDelta / ( Math.abs( scrollDelta ) );
 
@@ -450,26 +484,55 @@
 	function keyHandler( e ) {
 		// Disable scrolling with keys when user has focus on text input elements
 		if ( /^text/.test( e.target.type ) ) return;
+
 		switch ( e.keyCode ) {
 			case 40: // Down Arrow
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollSteps( STEP_SIZE );
 				break;
 			case 38: // Up Arrow
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollSteps( -STEP_SIZE );
 				break;
 			case 34: //Page Down
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollSteps( BIG_STEP_SIZE );
 				break;
 			case 33: //Page Up
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollSteps( -BIG_STEP_SIZE );
 				break;
 			case 32: // Spacebar
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollSteps( BIG_STEP_SIZE * ( e.shiftKey ? -1 : 1 ) );
 				break;
 			case 35: // End
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollToStep( pathList.length - 1 );
 				break;
 			case 36: //Home
+				if(onBranch === true) {
+					e.preventDefault();
+					return;
+				}
 				scrollToStep( 0 );
 				break;
 		}
@@ -507,16 +570,16 @@
 			interval = setInterval(function() {
 				easedSteps = Math.round( ($.easing[easing] || $.easing.swing)( ++currentFrame / frames, duration / frames * currentFrame, 0, steps, duration) );
 				nextStep = wrapStep( startStep + easedSteps);
+				scrollToStep( nextStep, true );
 				if (currentFrame === frames) {
+					isAnimating = false;
 					clearInterval( interval );
 					if ( typeof easing === "function" ) {
 						easing();
 					} else if ( callback ) {
 						callback();
 					}
-					isAnimating = false;
 				}
-				scrollToStep( nextStep, true );
 			}, duration / frames);
 	}
 
@@ -537,16 +600,28 @@
 		if (isAnimating) return;
 		var cb;
 
-		isAnimating = true;
-
 		if (pathList[ stepParam ] ){
 			cb = pathList[ stepParam ].callback;
-			element.animate( makeCSS( pathList[ stepParam ]), duration, easing, function() {
-				isAnimating = false;
+
+			var difX = (makeCSS( pathList[ stepParam ]).left) - (element.css('left').replace('px','')),
+				difY = (makeCSS( pathList[ stepParam ]).top) - (element.css('top').replace('px',''));
+
+			if(difX != 0 || difY != 0) {
+				isAnimating = true;
+
+				element.animate( makeCSS( pathList[ stepParam ]), duration, easing, function() {
+					isAnimating = false;
+					if(callback) {
+						callback();
+					}
+				});
+			} else {
 				if(callback) {
 					callback();
 				}
-			});
+			}
+
+			
 		}
 		if( scrollHandle ) scrollHandle.css( "top", stepParam / (pathList.length - 1 ) * ( scrollBar.height() - scrollHandle.height() ) + "px" );
 		if ( cb && stepParam !== step && !isAnimating ) cb();
@@ -555,6 +630,9 @@
 
 	/* Finds the step number of a given name */
 	function findStep( name ) {
+		if(onBranch) {
+			return branches[activeBranch].getNameMap()[name];
+		}
 		return pathObject.getNameMap()[ name ];
 	}
 
